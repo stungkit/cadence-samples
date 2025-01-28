@@ -7,6 +7,7 @@ export PATH := $(GOPATH)/bin:$(PATH)
 default: test
 
 PROGS = helloworld \
+	delaystart \
 	branch \
 	childworkflow \
 	crossdomain \
@@ -52,6 +53,7 @@ TEST_DIRS=./cmd/samples/cron \
 	./cmd/samples/recipes/choice \
 	./cmd/samples/recipes/greetings \
 	./cmd/samples/recipes/helloworld \
+	./cmd/samples/recipes/delaystart \
 	./cmd/samples/recipes/cancelactivity \
 	./cmd/samples/recipes/pickfirst \
 	./cmd/samples/recipes/mutex \
@@ -74,6 +76,9 @@ cancelactivity:
 
 helloworld:
 	go build -o bin/helloworld cmd/samples/recipes/helloworld/*.go
+
+delaystart:
+	go build -o bin/delaystart cmd/samples/recipes/delaystart/*.go
 
 branch:
 	go build -o bin/branch cmd/samples/recipes/branch/*.go
@@ -168,6 +173,7 @@ sideeffect:
 	go build -o bin/sideeffect cmd/samples/recipes/sideeffect/*.go
 
 bins: helloworld \
+	delaystart \
 	branch \
 	crossdomain \
 	childworkflow \

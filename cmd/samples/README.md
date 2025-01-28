@@ -10,8 +10,16 @@ See instructions for running the Cadence Server: https://github.com/uber/cadence
 
 ## Steps to run samples
 ### Build Samples
+* Build all the workflows at once
 ```
 make
+```
+* Build a workflow individually
+```
+make <WORKFLOW NAME>
+
+Example:
+    make helloworld 
 ```
 
 ### Run HelloWorld Sample
