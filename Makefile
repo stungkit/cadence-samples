@@ -35,6 +35,7 @@ PROGS = helloworld \
 	pageflow \
 	signalcounter \
 	sideeffect \
+	sleep \
 
 TEST_ARG ?= -race -v -timeout 5m
 BUILD := ./build
@@ -68,6 +69,7 @@ TEST_DIRS=./cmd/samples/cron \
 	./cmd/samples/recipes/searchattributes \
 	./cmd/samples/recipes/sideeffect \
 	./cmd/samples/recipes/signalcounter \
+	./cmd/samples/recipes/sleep \
 	./cmd/samples/recovery \
 	./cmd/samples/pso \
 
@@ -80,6 +82,9 @@ helloworld:
 
 delaystart:
 	go build -o bin/delaystart cmd/samples/recipes/delaystart/*.go
+
+sleep:
+	go build -o bin/sleep cmd/samples/recipes/sleep/*.go
 
 branch:
 	go build -o bin/branch cmd/samples/recipes/branch/*.go
@@ -207,6 +212,7 @@ bins: helloworld \
 	pageflow \
 	signalcounter \
 	sideeffect \
+	sleep \
 
 test: bins
 	@rm -f test
