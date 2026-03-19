@@ -1,14 +1,86 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"reflect"
 	"strings"
+	"time"
 
+	"go.uber.org/cadence/activity"
 	"go.uber.org/cadence/encoded"
+	"go.uber.org/cadence/workflow"
+	"go.uber.org/zap"
 )
 
+// compressedJSONDataConverter implements encoded.DataConverter with gzip compression.
+// It serializes data to JSON, then compresses using gzip to reduce storage size.
+type compressedJSONDataConverter struct{}
+
+// NewCompressedJSONDataConverter creates a new compressed JSON data converter.
+func NewCompressedJSONDataConverter() encoded.DataConverter {
+	return &compressedJSONDataConverter{}
+}
+
+func (dc *compressedJSONDataConverter) ToData(value ...interface{}) ([]byte, error) {
+	var jsonBuf bytes.Buffer
+	enc := json.NewEncoder(&jsonBuf)
+	for i, obj := range value {
+		err := enc.Encode(obj)
+		if err != nil {
+			return nil, fmt.Errorf("unable to encode argument: %d, %v, with error: %v", i, reflect.TypeOf(obj), err)
+		}
+	}
+
+	var compressedBuf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&compressedBuf)
+
+	_, err := gzipWriter.Write(jsonBuf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("unable to compress data: %v", err)
+	}
+
+	err = gzipWriter.Close()
+	if err != nil {
+		return nil, fmt.Errorf("unable to close gzip writer: %v", err)
+	}
+
+	return compressedBuf.Bytes(), nil
+}
+
+func (dc *compressedJSONDataConverter) FromData(input []byte, valuePtr ...interface{}) error {
+	// Handle empty input (e.g., when workflow is started without --input from CLI)
+	if len(input) == 0 {
+		return nil
+	}
+
+	gzipReader, err := gzip.NewReader(bytes.NewBuffer(input))
+	if err != nil {
+		return fmt.Errorf("unable to create gzip reader: %v", err)
+	}
+	defer gzipReader.Close()
+
+	decompressedData, err := io.ReadAll(gzipReader)
+	if err != nil {
+		return fmt.Errorf("unable to decompress data: %v", err)
+	}
+
+	dec := json.NewDecoder(bytes.NewBuffer(decompressedData))
+	for i, obj := range valuePtr {
+		err := dec.Decode(obj)
+		if err != nil {
+			return fmt.Errorf("unable to decode argument: %d, %v, with error: %v", i, reflect.TypeOf(obj), err)
+		}
+	}
+	return nil
+}
+
 // LargePayload represents a complex data structure with nested objects and arrays
+// to demonstrate compression benefits.
 type LargePayload struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
@@ -21,7 +93,6 @@ type LargePayload struct {
 	Stats       Statistics             `json:"statistics"`
 }
 
-// Item represents a single item in the payload
 type Item struct {
 	ItemID      string            `json:"item_id"`
 	Title       string            `json:"title"`
@@ -33,7 +104,6 @@ type Item struct {
 	Inventory   Inventory         `json:"inventory"`
 }
 
-// Review represents a product review
 type Review struct {
 	ReviewID   string  `json:"review_id"`
 	UserID     string  `json:"user_id"`
@@ -46,7 +116,6 @@ type Review struct {
 	Score      float64 `json:"score"`
 }
 
-// Inventory represents inventory information
 type Inventory struct {
 	Quantity    int    `json:"quantity"`
 	Location    string `json:"location"`
@@ -54,7 +123,6 @@ type Inventory struct {
 	Status      string `json:"status"`
 }
 
-// Config represents configuration settings
 type Config struct {
 	Version     string            `json:"version"`
 	Environment string            `json:"environment"`
@@ -63,7 +131,6 @@ type Config struct {
 	Limits      Limits            `json:"limits"`
 }
 
-// Limits represents system limits
 type Limits struct {
 	MaxItems    int `json:"max_items"`
 	MaxRequests int `json:"max_requests_per_minute"`
@@ -72,7 +139,6 @@ type Limits struct {
 	TimeoutSecs int `json:"timeout_seconds"`
 }
 
-// HistoryEntry represents a historical event
 type HistoryEntry struct {
 	EventID   string            `json:"event_id"`
 	Timestamp string            `json:"timestamp"`
@@ -82,7 +148,6 @@ type HistoryEntry struct {
 	Severity  string            `json:"severity"`
 }
 
-// Statistics represents statistical data
 type Statistics struct {
 	TotalItems     int     `json:"total_items"`
 	TotalUsers     int     `json:"total_users"`
@@ -93,11 +158,10 @@ type Statistics struct {
 }
 
 // CreateLargePayload creates a sample large payload with realistic data
+// to demonstrate compression benefits.
 func CreateLargePayload() LargePayload {
-	// Create a large description with repeated text to demonstrate compression
 	largeDescription := strings.Repeat("This is a comprehensive product catalog containing thousands of items with detailed descriptions, specifications, and user reviews. Each item includes pricing information, inventory status, and customer feedback. The catalog is designed to provide complete information for customers making purchasing decisions. ", 50)
 
-	// Create sample items
 	items := make([]Item, 100)
 	for i := 0; i < 100; i++ {
 		reviews := make([]Review, 25)
@@ -137,7 +201,6 @@ func CreateLargePayload() LargePayload {
 		}
 	}
 
-	// Create history entries
 	history := make([]HistoryEntry, 50)
 	for i := 0; i < 50; i++ {
 		details := make(map[string]string)
@@ -155,7 +218,6 @@ func CreateLargePayload() LargePayload {
 		}
 	}
 
-	// Create metadata
 	metadata := make(map[string]interface{})
 	for i := 0; i < 30; i++ {
 		metadata[fmt.Sprintf("meta_key_%d", i)] = strings.Repeat("This is comprehensive metadata information with detailed descriptions and specifications. ", 5)
@@ -199,25 +261,69 @@ func CreateLargePayload() LargePayload {
 	}
 }
 
-// GetPayloadSizeInfo returns information about the payload size before and after compression
+// GetPayloadSizeInfo returns information about the payload size before and after compression.
 func GetPayloadSizeInfo(payload LargePayload, converter encoded.DataConverter) (int, int, float64, error) {
-	// Serialize to JSON to get original size
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to marshal payload: %v", err)
 	}
 	originalSize := len(jsonData)
 
-	// Compress using our converter
 	compressedData, err := converter.ToData(payload)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to compress payload: %v", err)
 	}
 	compressedSize := len(compressedData)
 
-	// Calculate compression ratio
 	compressionRatio := float64(compressedSize) / float64(originalSize)
 	compressionPercentage := (1.0 - compressionRatio) * 100
 
 	return originalSize, compressedSize, compressionPercentage, nil
+}
+
+// LargeDataConverterWorkflow demonstrates processing large payloads with compression.
+// The DataConverter automatically compresses/decompresses all workflow data.
+// Note: The workflow generates its own payload internally so it can be started from CLI
+// without requiring the CLI to use the custom DataConverter. The compression demonstration
+// happens when data is passed between workflow and activity.
+func LargeDataConverterWorkflow(ctx workflow.Context) (LargePayload, error) {
+	logger := workflow.GetLogger(ctx)
+
+	// Generate the large payload internally - this allows the workflow to be started
+	// from CLI without needing a custom DataConverter on the client side.
+	// The compression benefit is demonstrated when passing data to/from activities.
+	input := CreateLargePayload()
+
+	logger.Info("Large payload workflow started", zap.String("payload_id", input.ID))
+	logger.Info("Processing large payload with compression", zap.Int("items_count", len(input.Items)))
+
+	activityOptions := workflow.ActivityOptions{
+		ScheduleToStartTimeout: time.Minute,
+		StartToCloseTimeout:    time.Minute,
+	}
+	ctx = workflow.WithActivityOptions(ctx, activityOptions)
+
+	var result LargePayload
+	err := workflow.ExecuteActivity(ctx, LargeDataConverterActivity, input).Get(ctx, &result)
+	if err != nil {
+		logger.Error("Large payload activity failed", zap.Error(err))
+		return LargePayload{}, err
+	}
+
+	logger.Info("Large payload workflow completed", zap.String("result_id", result.ID))
+	logger.Info("Note: All large payload data was automatically compressed/decompressed using gzip compression")
+	return result, nil
+}
+
+// LargeDataConverterActivity processes the large payload.
+// In production, this might involve data transformation, validation, etc.
+func LargeDataConverterActivity(ctx context.Context, input LargePayload) (LargePayload, error) {
+	logger := activity.GetLogger(ctx)
+	logger.Info("Large payload activity received input", zap.String("payload_id", input.ID), zap.Int("items_count", len(input.Items)))
+
+	input.Name = input.Name + " (Processed)"
+	input.Stats.TotalItems = len(input.Items)
+
+	logger.Info("Large payload activity completed", zap.String("result_id", input.ID))
+	return input, nil
 }

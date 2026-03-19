@@ -13,8 +13,8 @@ import (
 func Test_LargeDataConverterWorkflow(t *testing.T) {
 	testSuite := &testsuite.WorkflowTestSuite{}
 	env := testSuite.NewTestWorkflowEnvironment()
-	env.RegisterWorkflow(largeDataConverterWorkflow)
-	env.RegisterActivity(largeDataConverterActivity)
+	env.RegisterWorkflow(LargeDataConverterWorkflow)
+	env.RegisterActivity(LargeDataConverterActivity)
 
 	dataConverter := NewCompressedJSONDataConverter()
 	workerOptions := worker.Options{
@@ -22,14 +22,13 @@ func Test_LargeDataConverterWorkflow(t *testing.T) {
 	}
 	env.SetWorkerOptions(workerOptions)
 
-	input := CreateLargePayload()
-
 	var activityResult LargePayload
 	env.SetOnActivityCompletedListener(func(activityInfo *activity.Info, result encoded.Value, err error) {
 		result.Get(&activityResult)
 	})
 
-	env.ExecuteWorkflow(largeDataConverterWorkflow, input)
+	// Workflow generates its own payload internally, no input needed
+	env.ExecuteWorkflow(LargeDataConverterWorkflow)
 
 	require.True(t, env.IsWorkflowCompleted())
 	require.NoError(t, env.GetWorkflowError())
